@@ -228,6 +228,94 @@
   )
 )
 
+;; Simulates a complex distribution scenario to forecast potential rewards
+;; This function takes a hypothetical user, their potential score improvement,
+;; a projected market trend, and a duration to simulate over.
+;; It returns a forecast of total rewards under different volatility assumptions.
+;;
+;; This simulation is critical for the "Predictive" nature of the contract.
+;; It helps users decide whether to stake more or improve their score.
+(define-read-only (simulate-distribution-scenario 
+    (user principal) 
+    (projected-score-increase uint) 
+    (market-trend-forecast uint)
+    (simulation-duration uint)
+    (include-staking-boost bool)
+  )
+  (let
+    (
+      ;; Fetch current user score or default to 0 if not registered
+      (current-score (default-to u0 (map-get? user-prediction-scores user)))
+      ;; Project the new score, capping at 100
+      (projected-score (if (> (+ current-score projected-score-increase) u100)
+                           u100
+                           (+ current-score projected-score-increase)))
+      
+      ;; Determine the multiplier to use for simulation
+      (current-stake-data (default-to {amount: u0, unlock-height: u0, multiplier: u1} (map-get? user-stakes user)))
+      (base-multiplier (get multiplier current-stake-data))
+      (simulated-multiplier (if include-staking-boost 
+                                (if (< base-multiplier u3) (+ base-multiplier u1) u3) 
+                                base-multiplier))
+
+      ;; Define three volatility scenarios for the simulation:
+      ;; 1. Optimistic: Low volatility (stable market) -> Higher rewards
+      (optimistic-volatility u5)
+      ;; 2. Neutral: Average volatility -> Moderate rewards
+      (neutral-volatility u20)
+      ;; 3. Pessimistic: High volatility (unstable market) -> Lower rewards
+      (pessimistic-volatility u50)
+
+      ;; Calculate the base reward for one period under each scenario
+      (optimistic-reward (calculate-reward-ratio projected-score market-trend-forecast optimistic-volatility simulated-multiplier))
+      (neutral-reward (calculate-reward-ratio projected-score market-trend-forecast neutral-volatility simulated-multiplier))
+      (pessimistic-reward (calculate-reward-ratio projected-score market-trend-forecast pessimistic-volatility simulated-multiplier))
+
+      ;; Extrapolate over the simulation duration (e.g., number of periods)
+      (total-optimistic (* optimistic-reward simulation-duration))
+      (total-neutral (* neutral-reward simulation-duration))
+      (total-pessimistic (* pessimistic-reward simulation-duration))
+
+      ;; Calculate a "confidence score" for the prediction based on the spread
+      ;; A smaller spread between optimistic and pessimistic means higher confidence
+      (spread (- total-optimistic total-pessimistic))
+      (confidence-level (if (< spread u100) 
+                            "High Accuracy" 
+                            (if (< spread u500) "Medium Accuracy" "Low Accuracy")))
+      
+      ;; Advanced Analysis: ROI calculation
+      ;; Estimate if the effort to increase score is worth it
+      (efficiency-ratio (if (> projected-score-increase u0) 
+                            (/ total-neutral projected-score-increase) 
+                            u0))
+    )
+    ;; Return a detailed tuple with all forecast data
+    (ok {
+      user: user,
+      input-params: {
+        base-score: current-score,
+        target-score: projected-score,
+        boost-active: include-staking-boost,
+        simulated-multiplier: simulated-multiplier
+      },
+      forecasts: {
+        optimistic: total-optimistic,
+        neutral: total-neutral,
+        pessimistic: total-pessimistic
+      },
+      analysis: {
+        spread: spread,
+        confidence: confidence-level,
+        market-assumption: market-trend-forecast,
+        efficiency-score: efficiency-ratio
+      },
+      recommendation: (if (> total-neutral u1000) 
+                          "Strong Buy/Engage" 
+                          "Hold/Observe")
+    })
+  )
+)
+
 ;; Helper to check system health (Read-Only)
 (define-read-only (get-system-health)
     (let 
